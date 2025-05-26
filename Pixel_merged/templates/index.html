@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Pixel War</title>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <h1>Pixel War</h1>
+    <label for="carte">Carte :</label>
+    <select id="carte">
+        {% for carte in cartes %}
+        <option value="{{ carte }}">{{ carte }}</option>
+        {% endfor %}
+    </select>
+    <input type="color" id="couleur" value="#ff0000" />
+    <div id="cooldown"></div>
+    <div id="map-container" style="display: grid; margin-top: 20px;"></div>
+
+    <script>
+        let key, id, nx, ny, timeout;
+        let canDraw = true;
+
+        async function preinit(carte) {
+            const res = await fetch(`/api/v1/${carte}/preinit`, { credentials: 'include' });
+            const json = await res.json();
+            key = json.key;
+            init(carte, key);
+        }
+
+        async function init(carte, key) {
+            const res = await fetch(`/api/v1/${carte}/init?key=${key}`, { credentials: 'include' });
+            const json = await res.json();
+            id = json.id;
+            nx = json.nx;
+            ny = json.ny;
+            timeout = json.timeout;
+            render(json.data);
+            setInterval(() => deltas(carte), 1000);
+        }
+
+        function render(data) {
+            const map = document.getElementById("map-container");
+            map.style.gridTemplateColumns = `repeat(${nx}, 10px)`;
+            map.style.gridTemplateRows = `repeat(${ny}, 10px)`;
+            map.innerHTML = "";
+            for (let y = 0; y < ny; y++) {
+                for (let x = 0; x < nx; x++) {
+                    const [r, g, b] = data[y][x];
+                    const div = document.createElement("div");
+                    div.className = "pixel";
+                    div.style.backgroundColor = `rgb(${r},${g},${b})`;
+                    div.onclick = () => draw(x, y);
+                    map.appendChild(div);
+                }
+            }
+        }
+
+        async function deltas(carte) {
+            const res = await fetch(`/api/v1/${carte}/deltas?id=${id}`, { credentials: "include" });
+            const json = await res.json();
+            for (const [x, y, r, g, b] of json.deltas) {
+                const div = document.querySelector(`#map-container > div:nth-child(${y * nx + x + 1})`);
+                if (div) div.style.backgroundColor = `rgb(${r},${g},${b})`;
+            }
+        }
+
+        async function draw(x, y) {
+            if (!canDraw) return;
+            const hex = document.getElementById("couleur").value;
+            const r = parseInt(hex.substr(1, 2), 16);
+            const g = parseInt(hex.substr(3, 2), 16);
+            const b = parseInt(hex.substr(5, 2), 16);
+            const carte = document.getElementById("carte").value;
+
+            const res = await fetch(`/api/v1/${carte}/set?x=${x}&y=${y}&r=${r}&g=${g}&b=${b}`, { credentials: 'include' });
+
+            if (res.status === 429) {
+                const json = await res.json();
+                cooldown(json.retry_after);
+            } else {
+                cooldown(timeout);
+            }
+        }
+
+        function cooldown(seconds) {
+            canDraw = false;
+            const cd = document.getElementById("cooldown");
+            let s = seconds;
+            cd.innerText = `Attendez ${s} secondes...`;
+            const interval = setInterval(() => {
+                s--;
+                cd.innerText = `Attendez ${s} secondes...`;
+                if (s <= 0) {
+                    clearInterval(interval);
+                    cd.innerText = "";
+                    canDraw = true;
+                }
+            }, 1000);
+        }
+
+        document.getElementById("carte").addEventListener("change", (e) => {
+            preinit(e.target.value);
+        });
+
+        window.onload = () => {
+            const selected = document.getElementById("carte").value;
+            preinit(selected);
+        };
+    </script>
+</body>
+</html>
